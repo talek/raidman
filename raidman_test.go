@@ -5,13 +5,12 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/mitchellh/go-homedir"
 )
 
-func TestTCP(t *testing.T) {
-	c, err := Dial("tcp", "localhost:5555")
-	if err != nil {
-		t.Fatal(err.Error())
-	}
+func probeEvent(c *Client, t *testing.T) {
 	var event = &Event{
 		State:      "success",
 		Host:       "raidman",
@@ -22,7 +21,7 @@ func TestTCP(t *testing.T) {
 		Attributes: map[string]string{"type": "test"},
 	}
 
-	err = c.Send(event)
+	err := c.Send(event)
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -46,7 +45,31 @@ func TestTCP(t *testing.T) {
 	if !testAttributeExists {
 		t.Error("Attribute \"type\" is missing")
 	}
+}
 
+func TestTCP(t *testing.T) {
+	c, err := Dial("tcp", "localhost:5555")
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	probeEvent(c, t)
+	c.Close()
+}
+
+func TestTLSConnection(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	timeout, err := time.ParseDuration("5s")
+	certFile, _ := homedir.Expand("~/riemann-client-crt.pem")
+	keyFile, _ := homedir.Expand("~/riemann-client-key.pem")
+	c, err := TlsDial(hostname+":5554", timeout, certFile, keyFile)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	probeEvent(c, t)
 	c.Close()
 }
 
@@ -201,7 +224,7 @@ func TestDialer(t *testing.T) {
 	}
 	val := reflect.Indirect(reflect.ValueOf(dialer))
 	// this is a horrible hack but proxy.Dialer exports nothing.
-	addr := fmt.Sprintf("%s", val.FieldByName("addr"))
+	addr := fmt.Sprintf("%s", val.FieldByName("proxyAddress"))
 	if addr != proxyAddr {
 		t.Errorf("RIEMANN_PROXY is set and is %s but dialer's proxy is %s", proxyAddr, addr)
 	}
@@ -242,7 +265,7 @@ func BenchmarkUDP(b *testing.B) {
 }
 
 func BenchmarkConcurrentTCP(b *testing.B) {
-	c, err := Dial("tcp", "localhost:5555")
+	c, _ := Dial("tcp", "localhost:5555")
 
 	var event = &Event{
 		Host:    "raidman",
@@ -254,7 +277,7 @@ func BenchmarkConcurrentTCP(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		go func(metric int) {
 			event.Metric = metric
-			err = c.Send(event)
+			_ = c.Send(event)
 			ch <- i
 		}(i)
 	}
@@ -264,7 +287,7 @@ func BenchmarkConcurrentTCP(b *testing.B) {
 }
 
 func BenchmarkConcurrentUDP(b *testing.B) {
-	c, err := Dial("udp", "localhost:5555")
+	c, _ := Dial("udp", "localhost:5555")
 
 	var event = &Event{
 		Host:    "raidman",
@@ -276,7 +299,7 @@ func BenchmarkConcurrentUDP(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		go func(metric int) {
 			event.Metric = metric
-			err = c.Send(event)
+			_ = c.Send(event)
 			ch <- i
 		}(i)
 	}

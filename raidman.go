@@ -3,6 +3,7 @@ package raidman
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,6 +28,11 @@ type tcp struct{}
 
 type udp struct{}
 
+type tlsDialer struct {
+	certFile string
+	keyFile  string
+}
+
 // Client represents a connection to a Riemann server
 type Client struct {
 	sync.Mutex
@@ -46,6 +52,16 @@ type Event struct {
 	Metric      interface{}       `json:"metric,omitempty"` // Could be Int, Float32, Float64
 	Description string            `json:"description,omitempty"`
 	Attributes  map[string]string `json:"attributes,omitempty"`
+}
+
+func (d tlsDialer) Dial(network, addr string) (c net.Conn, err error) {
+	cert, err := tls.LoadX509KeyPair(d.certFile, d.keyFile)
+	if err != nil {
+		return nil, err
+	}
+	config := &tls.Config{Certificates: []tls.Certificate{cert}}
+	c, err = tls.Dial("tcp", addr, config)
+	return
 }
 
 // Dial establishes a connection to a Riemann server at addr, on the network
@@ -80,6 +96,24 @@ func DialWithTimeout(netwrk, addr string, timeout time.Duration) (c *Client, err
 	return c, nil
 }
 
+func TlsDialWithTimeout(addr string, timeout time.Duration, certFile string, keyFile string) (c *Client, err error) {
+	c = new(Client)
+	cnet := new(tcp)
+
+	dialer := new(tlsDialer)
+	dialer.certFile = certFile
+	dialer.keyFile = keyFile
+
+	c.net = cnet
+	c.timeout = timeout
+	c.connection, err = dialer.Dial("tls", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return c, nil
+}
+
 func newDialer() (proxy.Dialer, error) {
 	var proxyUrl = os.Getenv("RIEMANN_PROXY")
 	var dialer proxy.Dialer = proxy.Direct
@@ -107,6 +141,10 @@ func newDialer() (proxy.Dialer, error) {
 // Known networks are "tcp", "tcp4", "tcp6", "udp", "udp4", and "udp6".
 func Dial(netwrk, addr string) (c *Client, err error) {
 	return DialWithTimeout(netwrk, addr, 0)
+}
+
+func TlsDial(addr string, timeout time.Duration, certFile string, keyFile string) (c *Client, err error) {
+	return TlsDialWithTimeout(addr, timeout, certFile, keyFile)
 }
 
 func (network *tcp) Send(message *proto.Msg, conn net.Conn) (*proto.Msg, error) {
